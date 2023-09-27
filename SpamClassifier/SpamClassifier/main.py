@@ -386,9 +386,9 @@ def prepare_dfs_for_train(df):
     features_df = pd.concat([normalized_df, tfidf_df], axis=1, ignore_index=True)
     features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
     lable_df_path = os.path.join(NORMALIZED_DATA_PATH, f"lable_df.parquet")
-    features_df.to_parquet("normalized_features.parquet", compression='gzip')
+    features_df.to_parquet(features_path, compression='gzip')
     label_df = number_df.filter(["id", "label"])
-    label_df.to_parquet("label_df.parquet", compression='gzip')
+    label_df.to_parquet(lable_df_path, compression='gzip')
     return features_df, label_df
 
 
@@ -464,9 +464,17 @@ def train_files(data_for_models, lable_df):
 
     best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
     best_clf_value = models_list.get(best_clf_key)
-    explainer = shap.Explainer(best_clf_value, X_train)
-    shap_values = explainer.shap_values(X_test)
-    shap.summary_plot(shap_values, X_test)
+    X_train_dense = X_train.toarray()  # Convert the sparse matrix to a dense matrix
+    X_train_df = pd.DataFrame(X_train_dense)  # Convert to DataFrame
+
+    # Assuming best_clf_value is your trained model
+    explainer = shap.Explainer(best_clf_value, X_train_df)
+    shap_values = explainer(X_train_df.iloc[0])
+    shap.summary_plot(shap_values, X_train_df)
+
+    # Save the plot as a PNG file (adjust the filename and path as needed)
+    plt.savefig('shap_summary_plot.png')
+
     print(shap.summary_plot(shap_values, X_test))
     BEST_CLF = best_clf_value
     print(best_clf_key, best_clf_value)
@@ -479,7 +487,7 @@ def train_files(data_for_models, lable_df):
 
 def prepare_data_for_train(dataframe):
     features_df, label_df = prepare_dfs_for_train(dataframe)
-    features_path = os.path.join(ROOT_PATH, f"normalized_features.parquet")
+    features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
     table = pq.read_table("normalized_features.parquet")
     features_df = table.to_pandas()
     return features_df, label_df
@@ -491,10 +499,11 @@ if __name__ == '__main__':
     check_raw_data_separated = os.path.join(SEPARATED_DATA_PATH, "blocked_0.parquet")
     check_data_preprocessed = os.path.join(ROOT_PATH, f"pickle.pkl")
     check_data_lemmatized = os.path.join(PROCESSED_DATA_PATH, "preprocessed_data_1.csv")
-    check_data_normalized = os.path.join(ROOT_PATH, "lable_df.parquet")
+    check_data_normalized = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
     check_data_trained = os.path.join(PROCESSED_DATA_PATH, f"*.png")
 
     if not os.path.exists(check_raw_data_separated):
+        print("1")
         file_names_list = ["blocked_user.csv", "regular_user.csv"]
         list_of_all = []
         for file_name in file_names_list:
@@ -503,10 +512,13 @@ if __name__ == '__main__':
             files_separation(file_path)
 
     if not os.path.exists(check_data_lemmatized):
+        print("2")
         preprocess_files()
 
     if not os.path.exists(check_data_trained):
+        print("3")
         if not os.path.exists(check_data_normalized):
+            print("4")
             file_list = os.listdir(PROCESSED_DATA_PATH)
             print(len(file_list))
             dataframes = pd.DataFrame()
@@ -524,12 +536,12 @@ if __name__ == '__main__':
             features_df, label_df = prepare_data_for_train(dataframes)
             trained_data = train_files(features_df, label_df)
         else:
-            features_path = os.path.join(ROOT_PATH, "normalized_features.parquet")
+            features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
             pf = fastparquet.ParquetFile("normalized_features.parquet")
             table = pq.read_table("normalized_features.parquet")
             features_df = table.to_pandas()
             # features_df = fastparquet.ParquetFile("normalized_features.parquet").to_pandas()
-            label_df_path = os.path.join(ROOT_PATH, "label_df.parquet")
+            label_df_path = os.path.join(NORMALIZED_DATA_PATH, "label_df.parquet")
             label_df = fastparquet.ParquetFile("label_df.parquet").to_pandas()
             trained_data = train_files(features_df, label_df)
 
