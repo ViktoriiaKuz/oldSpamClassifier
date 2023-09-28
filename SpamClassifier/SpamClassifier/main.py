@@ -4,6 +4,7 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.ensemble import RandomForestRegressor
 import numpy as np
 import pandas as pd
+import xarray
 import seaborn as sns
 import dask.dataframe as dd
 import matplotlib.pyplot as plt
@@ -307,36 +308,36 @@ def normalize_numerical(df):
     return dft
 
 
-# def text_df_count(df):
-#    text_spam = df[df['label'] == 'blocked']['text']
-#    text_normal = df[df['label'] == 'regular']['text']
+def text_df_count(df):
+   text_spam = df[df['label'] == 'blocked']['text']
+   text_normal = df[df['label'] == 'regular']['text']
 
-#    blocked_dict = {}
-#    normal_dict = {}
+   blocked_dict = {}
+   normal_dict = {}
 
-#    for text in text_spam:
-#        words = text.split()
-#        for word in words:
-#            blocked_dict[word] = blocked_dict.get(word, 0) + 1
+   for text in text_spam:
+       words = text.split()
+       for word in words:
+           blocked_dict[word] = blocked_dict.get(word, 0) + 1
 
-#    for text in text_normal:
-#        words = text.split()
-#        for word in words:
-#            normal_dict[word] = normal_dict.get(word, 0) + 1
+   for text in text_normal:
+       words = text.split()
+       for word in words:
+           normal_dict[word] = normal_dict.get(word, 0) + 1
 
-#    common_words = set(blocked_dict.keys()) & set(normal_dict.keys())
-#    common_words = pd.DataFrame(common_words)
+   common_words = set(blocked_dict.keys()) & set(normal_dict.keys())
+   common_words = pd.DataFrame(common_words)
 
-#    blocked_dict = {word: freq for word, freq in blocked_dict.items() if word not in common_words}
-#    normal_dict = {word: freq for word, freq in normal_dict.items() if word not in common_words}
+   blocked_dict = {word: freq for word, freq in blocked_dict.items() if word not in common_words}
+   normal_dict = {word: freq for word, freq in normal_dict.items() if word not in common_words}
 
-#    blocked_df = pd.DataFrame(list(blocked_dict.items()), columns=['word', 'spam_frequency'])
-#    normal_df = pd.DataFrame(list(normal_dict.items()), columns=['word', 'normal_frequency'])
+   blocked_df = pd.DataFrame(list(blocked_dict.items()), columns=['word', 'spam_frequency'])
+   normal_df = pd.DataFrame(list(normal_dict.items()), columns=['word', 'normal_frequency'])
 
-#    count_df = pd.concat([blocked_df, normal_df], axis=1)
-#    count_df.to_csv('word_frequencies.csv', index=False, encoding='utf-8-sig')
-#    common_words.to_csv('common_words.csv', index=False, encoding='utf-8-sig')
-# return common_words
+   count_df = pd.concat([blocked_df, normal_df], axis=1)
+   count_df.to_csv('word_frequencies.csv', index=False, encoding='utf-8-sig')
+   common_words.to_csv('common_words.csv', index=False, encoding='utf-8-sig')
+
 
 
 def vectorizing_vectorizer(df):
@@ -377,8 +378,8 @@ def preprocess_files():
 
 
 def prepare_dfs_for_train(df):
-    fraction_to_sample = 0.5
-    df = df.sample(frac=fraction_to_sample, random_state=1)
+    #fraction_to_sample = 0.5
+    #df = df.sample(frac=fraction_to_sample, random_state=1)
     number_df = label_dummy_coding(drop_columns(df))
     numerical_df = numerical(number_df)
     normalized_df = normalize_numerical(numerical_df)
@@ -396,53 +397,74 @@ from sklearn.decomposition import SparsePCA, TruncatedSVD
 from scipy.sparse import csr_matrix
 
 
-def perform_pca(X_sparse, n_components=100):
-    svd = TruncatedSVD(n_components=n_components)
-    X_reduced = svd.fit_transform(X_sparse)
-    return csr_matrix(X_reduced)
+# def perform_pca(X_sparse, n_components=100):
+#     svd = TruncatedSVD(n_components=n_components)
+#     X_reduced = svd.fit_transform(X_sparse)
+#     return csr_matrix(X_reduced)
 
 
 def train_files(data_for_models, lable_df):
-    X_sparse = csr_matrix(data_for_models)
-    X_sparse = perform_pca(X_sparse)
-    X_train, X_test, y_train, y_test = train_test_split(X_sparse, lable_df.iloc[:, 0], test_size=0.15,
-                                                        random_state=111)
+    # X_sparse = csr_matrix(data_for_models)
+    # X_sparse = perform_pca(X_sparse)
+    #X_train, X_test, y_train, y_test = train_test_split(data_for_models, lable_df.iloc[:, 0], test_size=0.15,
+    #                                                   random_state=111)
 
     models_list = {'Logistic Regression': LogisticRegression(), 'Decision Tree': DecisionTreeClassifier(),
-                   'Random Forest': RandomForestClassifier(), 'SVC': SVC()}
+                   'Random Forest': RandomForestClassifier()} #, 'SVC': SVC()}
     pred_scores_word_vectors = {}
     results = {}
     from sklearn.model_selection import StratifiedKFold
-    n_splits = 100
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True)  # чи треба тут random state
+    n_splits = 10
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                          random_state=42)  # Чи тут треба random state
 
     for name, classifier in tqdm(models_list.items()):
         accuracy_scores = []
         classification_reports = []
         confusion_matrices = []
         y_preds = []
+        y_tests = []
 
-        for train_idx, test_idx in tqdm(skf.split(X_sparse, label_df['label'])):
-            X_train, X_test = X_sparse[train_idx], X_sparse[test_idx]
-            y_train, y_test = label_df['label'].iloc[train_idx], label_df['label'].iloc[test_idx]
+        lable_df = np.ravel(lable_df)
+        for train_idx, test_idx in tqdm(skf.split(data_for_models, lable_df)):
+
+
+            X_train, X_test = data_for_models.iloc[train_idx], data_for_models.iloc[test_idx]
+            y_train, y_test = lable_df[train_idx], lable_df[test_idx]
+
 
             classifier.fit(X_train, y_train)
             y_pred = classifier.predict(X_test)
             y_preds.append(y_pred)
+            y_tests.append(y_test)
 
             accuracy = accuracy_score(y_test, y_pred)
             pred_scores_word_vectors[name] = accuracy
             accuracy_scores.append(accuracy)
 
-            classification_rep = classification_report(y_test, y_pred,
-                                                       target_names=['class_0_normal', 'class_1_spammers'])
+            #classification_rep = classification_report(y_test, y_pred,
+             #                                          target_names=['class_0_normal', 'class_1_spammers'])
             #results[name]['Classification Report'] = classification_rep
-            classification_reports.append(classification_rep)
+            #classification_reports.append(classification_rep)
 
             cm = confusion_matrix(y_test, y_pred)
             confusion_matrices.append(cm)
 
+            # X_train_dense = X_train.to_xarray()  # Convert the sparse matrix to a dense matrix
+            # X_train_df = pd.DataFrame(X_train_dense)  # Convert to DataFrame
+            # explainer = shap.Explainer(name, X_train_df)
+            # shap_values_train = explainer(X_train_df)
+            # shap_values_test = explainer(X_test)
+            #
+            # # Create summary plots for both training and test data
+            # shap.summary_plot(shap_values_train, X_train_df)
+            # shap.summary_plot(shap_values_test, X_test)
+            #
+            # # Save the plot as a PNG file (adjust the filename and path as needed)
+            # plt.savefig(f'shap_summary_plot+{name}.png')
+
         mean_y_pred = np.concatenate(y_preds)
+        mean_y_test = np.concatenate(y_tests)
         mean_accuracy = sum(accuracy_scores) / n_splits
         mean_confusion_matrix = np.mean(confusion_matrices, axis=0)
         f, ax = plt.subplots(figsize=(5, 5))
@@ -453,7 +475,8 @@ def train_files(data_for_models, lable_df):
         plt.savefig(f"Confusion Matrix - {name} - {mean_accuracy}.png")
         plt.close()
 
-        mean_classification_report = classification_report(y_test, y_pred,
+
+        mean_classification_report = classification_report(mean_y_test, mean_y_pred,
                                                            target_names=['class_0_normal', 'class_1_spammers'])
 
         report_file_path = f'classification_report_{name}.txt'
@@ -464,23 +487,13 @@ def train_files(data_for_models, lable_df):
 
     best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
     best_clf_value = models_list.get(best_clf_key)
-    X_train_dense = X_train.toarray()  # Convert the sparse matrix to a dense matrix
-    X_train_df = pd.DataFrame(X_train_dense)  # Convert to DataFrame
 
-    # Assuming best_clf_value is your trained model
-    explainer = shap.Explainer(best_clf_value, X_train_df)
-    shap_values = explainer(X_train_df.iloc[0])
-    shap.summary_plot(shap_values, X_train_df)
-
-    # Save the plot as a PNG file (adjust the filename and path as needed)
-    plt.savefig('shap_summary_plot.png')
-
-    print(shap.summary_plot(shap_values, X_test))
     BEST_CLF = best_clf_value
     print(best_clf_key, best_clf_value)
     filename = f'{BEST_CLF}.pkl'
     with open(filename, 'wb') as file:
         pickle.dump(BEST_CLF, file)
+
 
     return results
 
