@@ -1,8 +1,0 @@
-Mean Classification Report - SVC:
-Accuracy: 0.874383769460716
-Precision_normal: 0.8418005994195177
-Precision_spammers: 0.9144934708355412
-Recall_normal: 0.9230565638233514
-Recall_spammers: 0.8254545454545454
-F1-Score_normal: 0.8804904566906281
-F1-Score_spammers: 0.8675947059574242

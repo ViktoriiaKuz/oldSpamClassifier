@@ -1,8 +1,0 @@
-Mean Classification Report - Logistic Regression:
-Accuracy: 0.852128574164291
-Precision_normal: 0.8259364133817579
-Precision_spammers: 0.8833775371353407
-Recall_normal: 0.8934621035346989
-Recall_spammers: 0.8105785123966942
-F1-Score_normal: 0.8583234943855746
-F1-Score_spammers: 0.8453448971984958

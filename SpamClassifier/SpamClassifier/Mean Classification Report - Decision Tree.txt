@@ -1,8 +1,0 @@
-Mean Classification Report - Decision Tree:
-Accuracy: 0.8816323980600063
-Precision_normal: 0.8758369917407013
-Precision_spammers: 0.8897205897619174
-Recall_normal: 0.8901542649727767
-Recall_spammers: 0.8730578512396694
-F1-Score_normal: 0.8824010692374646
-F1-Score_spammers: 0.880712721729392
