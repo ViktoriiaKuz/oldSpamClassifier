@@ -378,8 +378,8 @@ def preprocess_files():
 
 
 def prepare_dfs_for_train(df):
-    #fraction_to_sample = 0.5
-    #df = df.sample(frac=fraction_to_sample, random_state=1)
+    fraction_to_sample = 0.5
+    df = df.sample(frac=fraction_to_sample, random_state=1)
     number_df = label_dummy_coding(drop_columns(df))
     numerical_df = numerical(number_df)
     normalized_df = normalize_numerical(numerical_df)
@@ -403,90 +403,101 @@ from scipy.sparse import csr_matrix
 #     return csr_matrix(X_reduced)
 
 
-def train_files(data_for_models, lable_df):
-    # X_sparse = csr_matrix(data_for_models)
-    # X_sparse = perform_pca(X_sparse)
-    #X_train, X_test, y_train, y_test = train_test_split(data_for_models, lable_df.iloc[:, 0], test_size=0.15,
-    #                                                   random_state=111)
+def train_files(data_for_models, label_df):
+    models_list = {
+        'Logistic Regression': LogisticRegression(),
+        'Decision Tree': DecisionTreeClassifier(),
+        'Random Forest': RandomForestClassifier(),
+        'SVC': SVC()
+    }
 
-    models_list = {'Logistic Regression': LogisticRegression(), 'Decision Tree': DecisionTreeClassifier(),
-                   'Random Forest': RandomForestClassifier()} #, 'SVC': SVC()}
     pred_scores_word_vectors = {}
-    results = {}
-    from sklearn.model_selection import StratifiedKFold
-    n_splits = 10
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
-                          random_state=42)  # Чи тут треба random state
+    n_splits = 5
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+
+
+
+    label_df = np.ravel(label_df)
 
     for name, classifier in tqdm(models_list.items()):
-        accuracy_scores = []
-        classification_reports = []
         confusion_matrices = []
-        y_preds = []
-        y_tests = []
-
-        lable_df = np.ravel(lable_df)
-        for train_idx, test_idx in tqdm(skf.split(data_for_models, lable_df)):
-
-
+        accuracy_scores = []
+        precision_scores_0class = []
+        recall_scores_0class = []
+        f1_scores_0class = []
+        precision_scores_1class = []
+        recall_scores_1class = []
+        f1_scores_1class = []
+        for train_idx, test_idx in skf.split(data_for_models, label_df):
+            print(len(train_idx))
             X_train, X_test = data_for_models.iloc[train_idx], data_for_models.iloc[test_idx]
-            y_train, y_test = lable_df[train_idx], lable_df[test_idx]
-
+            y_train, y_test = label_df[train_idx], label_df[test_idx]
 
             classifier.fit(X_train, y_train)
             y_pred = classifier.predict(X_test)
-            y_preds.append(y_pred)
-            y_tests.append(y_test)
 
             accuracy = accuracy_score(y_test, y_pred)
             pred_scores_word_vectors[name] = accuracy
             accuracy_scores.append(accuracy)
 
-            #classification_rep = classification_report(y_test, y_pred,
-             #                                          target_names=['class_0_normal', 'class_1_spammers'])
-            #results[name]['Classification Report'] = classification_rep
-            #classification_reports.append(classification_rep)
-
             cm = confusion_matrix(y_test, y_pred)
             confusion_matrices.append(cm)
 
-            # X_train_dense = X_train.to_xarray()  # Convert the sparse matrix to a dense matrix
-            # X_train_df = pd.DataFrame(X_train_dense)  # Convert to DataFrame
-            # explainer = shap.Explainer(name, X_train_df)
-            # shap_values_train = explainer(X_train_df)
-            # shap_values_test = explainer(X_test)
-            #
-            # # Create summary plots for both training and test data
-            # shap.summary_plot(shap_values_train, X_train_df)
-            # shap.summary_plot(shap_values_test, X_test)
-            #
-            # # Save the plot as a PNG file (adjust the filename and path as needed)
-            # plt.savefig(f'shap_summary_plot+{name}.png')
+            classification_rep = classification_report(
+                y_test, y_pred, target_names=['class_0_normal', 'class_1_spammers'], output_dict=True
+            )
+            class_0 = classification_rep['class_0_normal']
+            class_1 = classification_rep['class_1_spammers']
+            precision_scores_0class.append(class_0['precision'])
+            precision_scores_1class.append(class_1['precision'])
+            f1_scores_0class.append(class_0['f1-score'])
+            f1_scores_1class.append(class_1['f1-score'])
+            recall_scores_0class.append(class_0['recall'])
+            recall_scores_1class.append(class_1['recall'])
 
-        mean_y_pred = np.concatenate(y_preds)
-        mean_y_test = np.concatenate(y_tests)
+
+
         mean_accuracy = sum(accuracy_scores) / n_splits
+        mean_precision_0class = sum(precision_scores_0class) / n_splits
+        mean_precision_1class = sum(precision_scores_1class) / n_splits
+        mean_recall_0class = sum(recall_scores_0class) / n_splits
+        mean_recall_1class = sum(recall_scores_1class) / n_splits
+        mean_f1_0class = sum(f1_scores_0class) / n_splits
+        mean_f1_1class = sum(f1_scores_1class) / n_splits
+
+        # Calculate mean confusion matrix
         mean_confusion_matrix = np.mean(confusion_matrices, axis=0)
+
+        # Plot and save the mean confusion matrix
         f, ax = plt.subplots(figsize=(5, 5))
         sns.heatmap(mean_confusion_matrix, annot=True, linewidths=0.5, linecolor="red", fmt=".0f", ax=ax)
         plt.xlabel("y_pred")
         plt.ylabel("y_true")
         plt.title(f"Confusion Matrix - {name} - {mean_accuracy}")
-        plt.savefig(f"Confusion Matrix - {name} - {mean_accuracy}.png")
+        plt.savefig(f"Mean Confusion Matrix - {name} - {mean_accuracy}.png")
         plt.close()
 
+        # Print and save the mean classification report
+        mean_classification_report = f"Mean Classification Report - {name}:\n" \
+                                     f"Accuracy: {mean_accuracy}\n" \
+                                     f"Precision_normal: {mean_precision_0class}\n" \
+                                     f"Precision_spammers: {mean_precision_1class}\n" \
+                                     f"Recall_normal: {mean_recall_0class}\n" \
+                                     f"Recall_spammers: {mean_recall_1class}\n" \
+                                     f"F1-Score_normal: {mean_f1_0class}\n"  \
+                                     f"F1-Score_spammers: {mean_f1_1class}\n"
 
-        mean_classification_report = classification_report(mean_y_test, mean_y_pred,
-                                                           target_names=['class_0_normal', 'class_1_spammers'])
 
-        report_file_path = f'classification_report_{name}.txt'
+        print(mean_classification_report)
 
-        # Open the file in write mode and write the classification report content
-        with open(report_file_path, 'w') as report_file:
+        with open(f"Mean Classification Report - {name}.txt", "w") as report_file:
             report_file.write(mean_classification_report)
+
 
     best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
     best_clf_value = models_list.get(best_clf_key)
+
+
 
     BEST_CLF = best_clf_value
     print(best_clf_key, best_clf_value)
@@ -495,13 +506,13 @@ def train_files(data_for_models, lable_df):
         pickle.dump(BEST_CLF, file)
 
 
-    return results
+
 
 
 def prepare_data_for_train(dataframe):
     features_df, label_df = prepare_dfs_for_train(dataframe)
     features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
-    table = pq.read_table("normalized_features.parquet")
+    table = pq.read_table(features_path)
     features_df = table.to_pandas()
     return features_df, label_df
 
@@ -550,49 +561,11 @@ if __name__ == '__main__':
             trained_data = train_files(features_df, label_df)
         else:
             features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
-            pf = fastparquet.ParquetFile("normalized_features.parquet")
-            table = pq.read_table("normalized_features.parquet")
+            #pf = fastparquet.ParquetFile(features_path)
+            table = pq.read_table(features_path)
             features_df = table.to_pandas()
             # features_df = fastparquet.ParquetFile("normalized_features.parquet").to_pandas()
-            label_df_path = os.path.join(NORMALIZED_DATA_PATH, "label_df.parquet")
-            label_df = fastparquet.ParquetFile("label_df.parquet").to_pandas()
+            label_df_path = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
+            label_df = fastparquet.ParquetFile(label_df_path).to_pandas()
             trained_data = train_files(features_df, label_df)
 
-    # for name, classifier in tqdm(models_list.items()):
-    #     classifier.fit(X_train, y_train)
-    #     y_pred = classifier.predict(X_test)
-    #
-    #     accuracy = accuracy_score(y_test, y_pred)
-    #     results[name] = {'Accuracy': accuracy}
-    #     pred_scores_word_vectors[name] = accuracy
-    #
-    #     classification_rep = classification_report(y_test, y_pred, target_names=['class_0_normal', 'class_1_spammers'])
-    #     results[name]['Classification Report'] = classification_rep
-    #     report_file_path = f'classification_report_{classifier}.txt'
-    #
-    #     # Open the file in write mode and write the classification report content
-    #     with open(report_file_path, 'w') as report_file:
-    #         report_file.write(classification_rep)
-    #
-    #     # Generate and save confusion matrix plot
-    #     cm = confusion_matrix(y_test, y_pred)
-    #     f, ax = plt.subplots(figsize=(5, 5))
-    #     sns.heatmap(cm, annot=True, linewidths=0.5, linecolor="red", fmt=".0f", ax=ax)
-    #     plt.xlabel("y_pred")
-    #     plt.ylabel("y_true")
-    #     plt.title(f"Confusion Matrix - {name} - {accuracy}")
-    #     plt.savefig(f'confusion_matrix_{name}.png')
-    #     plt.close()
-    #
-    # best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
-    # best_clf_value = models_list.get(best_clf_key)
-    # # explainer = shap.Explainer(best_clf_value, X_train)
-    # # shap_values = explainer.shap_values(X_test)
-    # # shap.summary_plot(shap_values, X_test)
-    # # print(shap.summary_plot(shap_values, X_test))
-    # BEST_CLF = best_clf_value
-    # print(best_clf_key, best_clf_value)
-    # filename = f'{BEST_CLF}.pkl'
-    # with open(filename, 'wb') as file:
-    #     pickle.dump(BEST_CLF, file)
-    # return results
