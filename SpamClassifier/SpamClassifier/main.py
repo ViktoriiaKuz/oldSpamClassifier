@@ -386,21 +386,18 @@ def prepare_dfs_for_train(df):
 
     fraction_to_sample = 0.1
     df = df.sample(frac=fraction_to_sample, random_state=1)
-    #print("dfshape",df.shape())
     df.columns = ["0","owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
                               "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
     number_df = label_dummy_coding(drop_columns(df))
     normalized_df = normalize_numerical(number_df) #ndarray
-    print("normalizeddf", normalized_df)
-    print("normalizeddf", type(normalized_df))
+
     tfidf_df = vectorizing_vectorizer(number_df) #sparse matrix of text only
-    print("tfidf", tfidf_df)
-    print("tfidf", type(tfidf_df))
+
     tfidf_df = np.array(tfidf_df.toarray()) #ndarray of text only
     features_df = np.concatenate([normalized_df, tfidf_df], axis=1) #nparray text +
     features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
     lable_df_path = os.path.join(NORMALIZED_DATA_PATH, f"lable_df.parquet")
-    #features_df = pd.DataFrame(features_df)
+
     print("features_df", sys.getsizeof(features_df))
     features_df = pa.Table.from_pandas(pd.DataFrame(features_df))
     print("lenfeaturesdf",len(features_df))
@@ -547,8 +544,6 @@ if __name__ == '__main__':
                                      "language"]
 
             features_df, label_df = prepare_dfs_for_train(df)
-            print(len(features_df))
-            print("aaa", len(label_df))
             trained_data = train_files(features_df, label_df)
         else:
             features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
