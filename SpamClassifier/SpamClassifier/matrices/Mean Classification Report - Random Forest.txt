@@ -1,0 +1,8 @@
+Mean Classification Report - Random Forest:
+Accuracy: 0.8941614117244404
+Precision_normal: 0.8875581415756397
+Precision_spammers: 0.9016430653812781
+Recall_normal: 0.9033110794226946
+Recall_spammers: 0.8849586776859504
+F1-Score_normal: 0.8952094512422036
+F1-Score_spammers: 0.8930548826169039
