@@ -348,10 +348,6 @@ def vectorizing_vectorizer(df):
     vectorizer = TfidfVectorizer(stop_words='english')
     vectors = vectorizer.fit_transform((df['text']))
     #features_df = pd.DataFrame(vectors.todense(), columns=vectorizer.get_feature_names_out())
-    #print("type vector", type(features_df))
-    #print("type vector", sys.getsizeof(features_df))
-    print("type vector", type(vectors))
-    print("type vector", sys.getsizeof(vectors))
 
     return vectors
 
