@@ -1,4 +1,9 @@
-"""f"""
+"""this code accepts the raw files of spammers and normal users messages and other parameters
+(such as number of recipients/first and last message sent, number of chats of the specified type,
+ and returns trained model which can classify new users according to their messages and parameters it trains different models,
+ indicates the level of accuracy and save the one which have the best output parameters. The code is built in the way to reduce
+ processing time and "save to files/pickles", in order to restart the process from the middle
+ (in case if part of job is already done)"""
 import os
 import pickle
 import sys
@@ -18,14 +23,14 @@ import spacy
 from deep_translator import GoogleTranslator
 from deep_translator.exceptions import NotValidLength
 from pandas.errors import SettingWithCopyWarning
+from scipy.sparse import hstack, csr_matrix, load_npz, save_npz
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 from tqdm import tqdm
 
@@ -75,12 +80,14 @@ ENGLISH_MODEL = spacy.load('en_core_web_sm')
 
 dfs_list = []
 newtext = ["Free entry"]
-header_text = ['owner', 'total_recipients', 'total_chats', 'newest_message', 'oldest_message', 'label', 'text', 'duration',
-          'chats_per_day', 'recipients_per_day', 'language']
+header_text = ['owner', 'total_recipients', 'total_chats', 'newest_message', 'oldest_message', 'label', 'text',
+               'duration',
+               'chats_per_day', 'recipients_per_day', 'language']
 
-header= ['owner', 'total_recipients', 'total_chats', 'newest_message', 'oldest_message', 'label', 'duration',
-           'chats_per_day', 'recipients_per_day', 'text', 'language']
-
+header = ['owner', 'total_recipients', 'total_chats', 'newest_message', 'oldest_message', 'label', 'duration',
+          'chats_per_day', 'recipients_per_day', 'text', 'language']
+columns = ["0", "owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
+           "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
 
 
 def files_separation(file_paths):
@@ -89,7 +96,7 @@ def files_separation(file_paths):
     list_df = [df[i:i + ROWS_TO_SEPARATE] for i in range(0, len(df), ROWS_TO_SEPARATE)]
     for i, df in tqdm(enumerate(list_df)):
         df[LABEL_KEY] = marker
-        df.to_parquet(os.path.join(SEPARATED_DATA_PATH, f"{marker}_{i}.parquet"), index=False)
+        df.to_parquet(os.path.join(SEPARATED_DATA_PATH, f"{marker}_{i}.parquet"), index=False, compression='gzip')
 
 
 def replacing_commas(file_path):
@@ -165,7 +172,7 @@ def duration_processing(df):
     def calculate_duration(first_message_date, last_message_date):
         FORMAT = "%Y-%m-%d %H:%M:%S"
         return datetime.strptime(str(first_message_date), FORMAT) - \
-            datetime.strptime(str(last_message_date), FORMAT)
+               datetime.strptime(str(last_message_date), FORMAT)
 
     FIRST_MESSAGE = 'newest_message'
     LAST_MESSAGE = 'oldest_message'
@@ -273,9 +280,10 @@ def process_chunk_and_save(chunk_df, i):
 
 def drop_columns(df):
     df = pd.DataFrame(df)
+    print("001")
     print(df.head)
     print(df.columns)
-    columns_to_drop = ['0','newest_message', 'oldest_message']
+    columns_to_drop = ['0', 'newest_message', 'oldest_message']
     df = df.drop(columns=['duration', 'language', 'owner', 'label'])
     columns_to_drop_existing = []
 
@@ -293,23 +301,12 @@ def label_dummy_coding(df):
     return df
 
 
-#def numerical(df):
-    #numerical_df = df.drop(columns=['text', 'label'])
-    #return numerical_df
-
-
 def normalize_numerical(df):
     scaler = MinMaxScaler()
     df = df.drop(columns=['text'])
-
     # df = df.replace([np.inf, -np.inf], np.nan)
-    dft = scaler.fit_transform(df)
-    #dftt = pd.DataFrame(dft)
-    #print("dft type",type(dftt))
-    #print("dft type", sys.getsizeof(dftt))
-    print("dft type", type(dft))
-    print("dft type", sys.getsizeof(dft))
-    return dft
+    df = scaler.fit_transform(df)
+    return df
 
 
 # def text_df_count(df):
@@ -343,20 +340,17 @@ def normalize_numerical(df):
 #    common_words.to_csv('common_words.csv', index=False, encoding='utf-8-sig')
 
 
-
 def vectorizing_vectorizer(df):
     vectorizer = TfidfVectorizer(stop_words='english')
     vectors = vectorizer.fit_transform((df['text']))
-    #features_df = pd.DataFrame(vectors.todense(), columns=vectorizer.get_feature_names_out())
-
+    # features_df = pd.DataFrame(vectors.todense(), columns=vectorizer.get_feature_names_out())
     return vectors
 
 
-
 def preprocess_files():
-    print("fgfg")
+    print("002")
     if not os.path.exists(check_data_preprocessed):
-        print("Fgfgfg")
+        print("003")
         file_list = os.listdir(SEPARATED_DATA_PATH)
 
         for i in tqdm(range(len(file_list))):
@@ -379,31 +373,43 @@ def preprocess_files():
 
 
 def prepare_dfs_for_train(df):
-
-    fraction_to_sample = 0.1
-    df = df.sample(frac=fraction_to_sample, random_state=1)
-    df.columns = ["0","owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
-                              "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
-    number_df = label_dummy_coding(drop_columns(df))
-    normalized_df = normalize_numerical(number_df) #ndarray
-
-    tfidf_df = vectorizing_vectorizer(number_df) #sparse matrix of text only
-
-    tfidf_df = np.array(tfidf_df.toarray()) #ndarray of text only
-    features_df = np.concatenate([normalized_df, tfidf_df], axis=1) #nparray text +
+    print("020", sys.getsizeof(df))  # df size 790275614
     features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
     lable_df_path = os.path.join(NORMALIZED_DATA_PATH, f"lable_df.parquet")
 
-    print("features_df", sys.getsizeof(features_df))
-    features_df = pa.Table.from_pandas(pd.DataFrame(features_df))
-    print("lenfeaturesdf",len(features_df))
-    pq.write_table(features_df,features_path)
-    print("number_df", df.columns)
+    #fraction_to_sample = 0.5
+    #df = df.sample(frac=fraction_to_sample, random_state=1)
+    df.columns = ["0", "owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
+                  "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
+    number_df = label_dummy_coding(drop_columns(df))
+    normalized_df = normalize_numerical(number_df)  # ndarray #size 128
+    print("021", sys.getsizeof(normalized_df))
+
+    tfidf_df = vectorizing_vectorizer(number_df)  # sparse matrix of text only #size 56
+    print("022", sys.getsizeof(tfidf_df))
+
+    # tfidf_df = np.array(tfidf_df.toarray()) #ndarray of text only #size 4868037920
+    # print("023", sys.getsizeof(tfidf_df))
+
+    dense_sparse_matrix = csr_matrix(normalized_df)
+    fdf = hstack([dense_sparse_matrix, tfidf_df])
+    print("023", sys.getsizeof(fdf))
+    save_npz(features_path, fdf)
+
+    # features_df = np.concatenate([normalized_df, tfidf_df], axis=1) #nparray text
+
+    features_df = fdf.toarray()
+    print("024", sys.getsizeof(features_df))
+
+    # Write the PyArrow Table to a Parquet file
+    features_df = pa.Table.from_pandas(pd.DataFrame(features_df)) # ??????????
+    print("011", sys.getsizeof(features_df))  # size 4868231960
+    features_df = pq.write_table(features_df, features_path, compression='gzip')
+    print("067", sys.getsizeof(features_df))
     label_df = df.filter(["label"])
-    label_df = pa.Table.from_pandas(label_df)
+    # label_df = pa.Table.from_pandas(label_df)
 
-
-    pq.write_table(label_df,lable_df_path)
+    label_df = label_df.to_parquet(lable_df_path, index=False, compression='gzip')
 
     return features_df, label_df
 
@@ -415,38 +421,47 @@ def prepare_dfs_for_train(df):
 
 
 def train_files(data_for_models, label_df):
-
+    print("009")
     models_list = {
         'Logistic Regression': LogisticRegression(),
         'Decision Tree': DecisionTreeClassifier(),
-        'Random Forest': RandomForestClassifier(),
-        'SVC': SVC()
+        'Random Forest': RandomForestClassifier()  # ,
+        # 'SVC': SVC()
     }
 
     pred_scores_word_vectors = {}
     n_splits = 5
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-
+    skf = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=10, random_state=42)
 
     for name, classifier in tqdm(models_list.items()):
         confusion_matrices = []
-        mean_accuracy = []
+        accuracy_list = []
         classification_reports_fds = []
+        mse_list = []
 
-        label_array = label_df['label'].values
-        #data_for_models = data_for_models.to_pandas()
-        data_for_models.reset_index(drop=True, inplace=True)
+        label_array = label_df['label']
+        #   data_for_models = data_for_models.to_pandas()
+        print("019", sys.getsizeof(data_for_models))
+        # print("048", label_df['label'])
+        #data_for_models.reset_index(drop=True, inplace=True)
 
-        for train_idx, test_idx in skf.split(data_for_models, label_array):
-            X_train, X_test = data_for_models.iloc[train_idx], data_for_models.iloc[test_idx]
+        for repeat_idx, (train_idx, test_idx) in enumerate(skf.split(data_for_models, label_array)):
+            X_train, X_test = data_for_models[train_idx], data_for_models[test_idx]
             y_train, y_test = label_array[train_idx], label_array[test_idx]
+
+            # Now you can use the 'fold' variable to keep track of the current fold number
+            print(f"Repeat {repeat_idx + 1}, Fold {repeat_idx % n_splits + 1}:")
 
             classifier.fit(X_train, y_train)
             y_pred = classifier.predict(X_test)
 
             accuracy = accuracy_score(y_test, y_pred)
+            #mse = mean_squared_error(y_test, y_pred)
+
+
             pred_scores_word_vectors[name] = accuracy
-            mean_accuracy.append(accuracy)
+            accuracy_list.append(accuracy)
+            #mse_list.append(mse)
 
             cm = confusion_matrix(y_test, y_pred)
             confusion_matrices.append(cm)
@@ -456,39 +471,50 @@ def train_files(data_for_models, label_df):
             )
             classification_rep_df = pd.DataFrame(classification_rep)
             classification_reports_fds.append(classification_rep_df)
-
+            print("f1", accuracy)
 
         # Calculate mean confusion matrix
+        print("010")
         mean_confusion_matrix = np.mean(confusion_matrices, axis=0)
-        mean_classification_report = np.mean(classification_reports_fds, axis=0)
-        mean_accuracy = np.mean(mean_accuracy)
+
+
+        mean_accuracy = np.mean(accuracy_list)
+        min_accuracy = np.min(mean_accuracy)
+        #max_accuracy = np.max(mean_accuracy)
+        std = np.sqrt(np.std(accuracy_list))
 
         # Plot and save the mean confusion matrix
         f, ax = plt.subplots(figsize=(5, 5))
         sns.heatmap(mean_confusion_matrix, annot=True, linewidths=0.5, linecolor="red", fmt=".0f", ax=ax)
         plt.xlabel("y_pred")
         plt.ylabel("y_true")
-        plt.title(f"Confusion Matrix - {name} - {mean_accuracy}")
-        plt.savefig(f"Mean Confusion Matrix - {name} - {mean_accuracy}.png")
+        plt.title(f"Confusion Matrix - {name} - {min_accuracy}")
+        plt.savefig(f"Mean Confusion Matrix - {name} - {min_accuracy}.png")
         plt.close()
+        mean_classification_report = pd.concat(classification_reports_fds).groupby(level=0).mean()
 
-        print(mean_classification_report)
-        mean_classification_report = pd.DataFrame(mean_classification_report)
+        mean_classification_report = mean_classification_report.rename(
+            columns={
+                'precision': 'Mean Precision',
+                'recall': 'Mean Recall',
+                'f1-score': 'Mean F1-Score',
+                'support': 'Mean Support'
+            }
+        )
+        print("std", std)
+        #mean_classification_report = pd.DataFrame(mean_classification_report)
 
-        mean_classification_report.to_csv(f"classification_report + {name}", encoding = 'utf-8-sig')
-
+        mean_classification_report.to_csv(f"classification_report + {name} + {mean_accuracy} +- {std} .csv",
+                                          encoding='utf-8-sig')
 
     best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
     best_clf_value = models_list.get(best_clf_key)
-
-
 
     BEST_CLF = best_clf_value
     print(best_clf_key, best_clf_value)
     filename = f'{BEST_CLF}.pkl'
     with open(filename, 'wb') as file:
         pickle.dump(BEST_CLF, file)
-
 
 
 if __name__ == '__main__':
@@ -501,7 +527,7 @@ if __name__ == '__main__':
     check_data_trained = os.path.join(PROCESSED_DATA_PATH, f"*.png")
 
     if not os.path.exists(check_raw_data_separated):
-        print("1")
+        print("004")
         file_names_list = ["blocked_user.csv", "regular_user.csv"]
         list_of_all = []
         for file_name in file_names_list:
@@ -510,13 +536,13 @@ if __name__ == '__main__':
             files_separation(file_path)
 
     if not os.path.exists(check_data_lemmatized):
-        print("2")
+        print("005")
         preprocess_files()
 
     if not os.path.exists(check_data_trained):
-        print("3")
+        print("006")
         if not os.path.exists(check_data_normalized):
-            print("4")
+            print("007")
             file_list = os.listdir(PROCESSED_DATA_PATH)
             df = pd.DataFrame()
             data = []
@@ -532,19 +558,22 @@ if __name__ == '__main__':
                             continue
 
                 df = pd.read_csv(StringIO('\n'.join(data)), encoding='utf-8-sig')
-                df.columns = ["0","owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
-                              "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
+                # df.columns = columns
                 dataframes = pd.concat([dataframes, df], axis=0, ignore_index=True)
-                dataframes.columns = ["0","owner", "label", "total_recipients", "total_chats", "newest_message",
-                                     "oldest_message", "duration", 'chats_per_day', 'recipients_per_day', "text",
-                                     "language"]
+                dataframes.columns = columns
 
-            features_df, label_df = prepare_dfs_for_train(df)
+            features_df, label_df = prepare_dfs_for_train(dataframes)
             trained_data = train_files(features_df, label_df)
         else:
-            features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
-            features_df = pd.read_parquet(features_path)
+            print("008")
+            # features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
+            # features_df = pd.read_parquet(features_path)
+            # label_df_path = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
+            # label_df = pd.read_parquet(label_df_path)
+            # trained_data = train_files(features_df, label_df)
+
+            features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet.npz")
+            features_df = load_npz(features_path)
             label_df_path = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
             label_df = pd.read_parquet(label_df_path)
             trained_data = train_files(features_df, label_df)
-
