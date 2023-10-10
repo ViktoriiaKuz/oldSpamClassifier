@@ -16,8 +16,6 @@ import langdetect
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import seaborn as sns
 import spacy
 from deep_translator import GoogleTranslator
@@ -278,35 +276,8 @@ def process_chunk_and_save(chunk_df, i):
     processed_df.to_csv(os.path.join(PROCESSED_DATA_PATH, f'preprocessed_data_{i}.csv'), encoding='utf-8-sig')
 
 
-def drop_columns(df):
-    df = pd.DataFrame(df)
-    print("001")
-    print(df.head)
-    print(df.columns)
-    columns_to_drop = ['0', 'newest_message', 'oldest_message']
-    df = df.drop(columns=['duration', 'language', 'owner', 'label'])
-    columns_to_drop_existing = []
-
-    for col in columns_to_drop:
-        if col in df.columns:
-            columns_to_drop_existing.append(col)
-
-    if columns_to_drop_existing:
-        df = df.drop(columns=columns_to_drop_existing)
-
-    return df
 
 
-def label_dummy_coding(df):
-    return df
-
-
-def normalize_numerical(df):
-    scaler = MinMaxScaler()
-    df = df.drop(columns=['text'])
-    # df = df.replace([np.inf, -np.inf], np.nan)
-    df = scaler.fit_transform(df)
-    return df
 
 
 # def text_df_count(df):
@@ -340,11 +311,6 @@ def normalize_numerical(df):
 #    common_words.to_csv('common_words.csv', index=False, encoding='utf-8-sig')
 
 
-def vectorizing_vectorizer(df):
-    vectorizer = TfidfVectorizer(stop_words='english')
-    vectors = vectorizer.fit_transform((df['text']))
-    # features_df = pd.DataFrame(vectors.todense(), columns=vectorizer.get_feature_names_out())
-    return vectors
 
 
 def preprocess_files():
@@ -374,44 +340,40 @@ def preprocess_files():
 
 def prepare_dfs_for_train(df):
     print("020", sys.getsizeof(df))  # df size 790275614
-    features_path = os.path.join(NORMALIZED_DATA_PATH, f"normalized_features.parquet")
-    lable_df_path = os.path.join(NORMALIZED_DATA_PATH, f"lable_df.parquet")
+    drop_in_number = ['newest_message', 'oldest_message', 'duration', 'language', 'owner', 'label', 'text']
+    df = df.sample(frac=0.5, random_state=1)
+    number_df = df.drop(columns=[c for c in drop_in_number if c in df])
+    number_feature_names = number_df.columns
+    number_sparse = csr_matrix(MinMaxScaler().fit_transform(number_df))
+    print("021", sys.getsizeof(number_sparse)) #56
 
-    #fraction_to_sample = 0.5
-    #df = df.sample(frac=fraction_to_sample, random_state=1)
-    df.columns = ["0", "owner", "label", "total_recipients", "total_chats", "newest_message", "oldest_message",
-                  "duration", 'chats_per_day', 'recipients_per_day', "text", "language"]
-    number_df = label_dummy_coding(drop_columns(df))
-    normalized_df = normalize_numerical(number_df)  # ndarray #size 128
-    print("021", sys.getsizeof(normalized_df))
+    vac = TfidfVectorizer(stop_words='english')
+    text_series = df['text']
+    tfidf_sparse = vac.fit_transform(text_series)
 
-    tfidf_df = vectorizing_vectorizer(number_df)  # sparse matrix of text only #size 56
-    print("022", sys.getsizeof(tfidf_df))
+    feature_sparse = hstack([number_sparse, tfidf_sparse])
+    feature_names = list(number_feature_names) + list(vac.get_feature_names_out())
 
-    # tfidf_df = np.array(tfidf_df.toarray()) #ndarray of text only #size 4868037920
-    # print("023", sys.getsizeof(tfidf_df))
+    print(feature_sparse.shape)
 
-    dense_sparse_matrix = csr_matrix(normalized_df)
-    fdf = hstack([dense_sparse_matrix, tfidf_df])
-    print("023", sys.getsizeof(fdf))
-    save_npz(features_path, fdf)
+    print("022", sys.getsizeof(feature_sparse)) #56
 
-    # features_df = np.concatenate([normalized_df, tfidf_df], axis=1) #nparray text
 
-    features_df = fdf.toarray()
-    print("024", sys.getsizeof(features_df))
 
-    # Write the PyArrow Table to a Parquet file
-    features_df = pa.Table.from_pandas(pd.DataFrame(features_df)) # ??????????
-    print("011", sys.getsizeof(features_df))  # size 4868231960
-    features_df = pq.write_table(features_df, features_path, compression='gzip')
-    print("067", sys.getsizeof(features_df))
+    features_path = os.path.join(NORMALIZED_DATA_PATH, f"feature_sparse.npz")
+    lable_path = os.path.join(NORMALIZED_DATA_PATH, f"lable_sparse.npz")
+    feature_names_path = os.path.join(NORMALIZED_DATA_PATH, f"feature_names.npz")
+
     label_df = df.filter(["label"])
-    # label_df = pa.Table.from_pandas(label_df)
+    label_sparse = csr_matrix(label_df)
 
-    label_df = label_df.to_parquet(lable_df_path, index=False, compression='gzip')
+    save_npz(features_path, feature_sparse)
+    save_npz(lable_path, label_sparse)
+    np.savez_compressed(feature_names_path, feature_names)
 
-    return features_df, label_df
+    exit(0)
+    return feature_sparse, label_sparse, feature_names
+
 
 
 # def perform_pca(X_sparse, n_components=100):
@@ -420,7 +382,7 @@ def prepare_dfs_for_train(df):
 #     return csr_matrix(X_reduced)
 
 
-def train_files(data_for_models, label_df):
+def train_files(feature_sparse, label_sparse, feature_names):
     print("009")
     models_list = {
         'Logistic Regression': LogisticRegression(),
@@ -433,21 +395,28 @@ def train_files(data_for_models, label_df):
     n_splits = 5
     skf = RepeatedStratifiedKFold(n_splits=n_splits, n_repeats=10, random_state=42)
 
+    print(feature_sparse.shape) #12131,167242
+    feature_dense = feature_sparse.toarray()
+    label_dense = label_sparse.toarray()
+    #print(feature_names.shape) #167242
+
+    #feature_sparse = vstack([feature_names, feature_sparse])
+
     for name, classifier in tqdm(models_list.items()):
         confusion_matrices = []
         accuracy_list = []
         classification_reports_fds = []
         mse_list = []
 
-        label_array = label_df['label']
+
         #   data_for_models = data_for_models.to_pandas()
-        print("019", sys.getsizeof(data_for_models))
+        print("019", sys.getsizeof(feature_dense))
         # print("048", label_df['label'])
         #data_for_models.reset_index(drop=True, inplace=True)
 
-        for repeat_idx, (train_idx, test_idx) in enumerate(skf.split(data_for_models, label_array)):
-            X_train, X_test = data_for_models[train_idx], data_for_models[test_idx]
-            y_train, y_test = label_array[train_idx], label_array[test_idx]
+        for repeat_idx, (train_idx, test_idx) in enumerate(skf.split(feature_dense, label_dense)):
+            X_train, X_test = feature_dense[train_idx], feature_dense[test_idx]
+            y_train, y_test = label_dense[train_idx], label_dense[test_idx]
 
             # Now you can use the 'fold' variable to keep track of the current fold number
             print(f"Repeat {repeat_idx + 1}, Fold {repeat_idx % n_splits + 1}:")
@@ -510,11 +479,23 @@ def train_files(data_for_models, label_df):
     best_clf_key = max(pred_scores_word_vectors, key=lambda k: pred_scores_word_vectors[k])
     best_clf_value = models_list.get(best_clf_key)
 
+    # model = best_clf_value
+    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # explainer = shap.Explainer(model, X_train)
+    # instance_idx = 0
+    # shap_values = explainer(X_test[instance_idx])
+    # for i, shap_value in enumerate(shap_values.values):
+    #     feature_name = feature_names[i]
+    #     print(f"{feature_name}: {shap_value}")
+
     BEST_CLF = best_clf_value
     print(best_clf_key, best_clf_value)
     filename = f'{BEST_CLF}.pkl'
     with open(filename, 'wb') as file:
         pickle.dump(BEST_CLF, file)
+
+
+
 
 
 if __name__ == '__main__':
@@ -523,7 +504,7 @@ if __name__ == '__main__':
     check_raw_data_separated = os.path.join(SEPARATED_DATA_PATH, "blocked_0.parquet")
     check_data_preprocessed = os.path.join(ROOT_PATH, f"pickle.pkl")
     check_data_lemmatized = os.path.join(PROCESSED_DATA_PATH, "preprocessed_data_1.csv")
-    check_data_normalized = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
+    check_data_normalized = os.path.join(NORMALIZED_DATA_PATH, "lable_sparse.npz")
     check_data_trained = os.path.join(PROCESSED_DATA_PATH, f"*.png")
 
     if not os.path.exists(check_raw_data_separated):
@@ -566,14 +547,20 @@ if __name__ == '__main__':
             trained_data = train_files(features_df, label_df)
         else:
             print("008")
-            # features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet")
-            # features_df = pd.read_parquet(features_path)
-            # label_df_path = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
-            # label_df = pd.read_parquet(label_df_path)
-            # trained_data = train_files(features_df, label_df)
+            features_path = os.path.join(NORMALIZED_DATA_PATH, "feature_sparse.npz")
+            feature_sparse = load_npz(features_path)
+            lable_path = os.path.join(NORMALIZED_DATA_PATH, "lable_sparse.npz")
+            label_sparse = load_npz(lable_path)
+            feature_names_path = os.path.join(NORMALIZED_DATA_PATH,  "feature_names.npz")
+            feature_names = np.load(feature_names_path)
 
-            features_path = os.path.join(NORMALIZED_DATA_PATH, "normalized_features.parquet.npz")
-            features_df = load_npz(features_path)
-            label_df_path = os.path.join(NORMALIZED_DATA_PATH, "lable_df.parquet")
-            label_df = pd.read_parquet(label_df_path)
-            trained_data = train_files(features_df, label_df)
+            stored_objects = feature_names.files
+
+            # Iterate through the stored objects and print their names
+            for obj_name in stored_objects:
+                print(f"Stored object name: {obj_name}")
+            if 'arr_0' in feature_names:
+                feature_names = feature_names['arr_0']
+                print(feature_names.shape) #167242,
+            print("787")
+            trained_data = train_files(feature_sparse, label_sparse, feature_names)
