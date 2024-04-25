@@ -1,1 +1,3 @@
-The very first try to create classifier. Contains well documented jupyter notebook with some tricks and the chain of commands 
+ Feature engineering and tfidf.
+ The very first try of creating a classifier. Contains a well-documented Jupyter notebook with some tricks and the chain of commands.
+ Lack of: inference functionality, k-folds, grid search, test/validation, SHAP 
